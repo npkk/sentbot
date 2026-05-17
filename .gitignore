@@ -1,3 +1,5 @@
+
+
 # Python
 __pycache__/
 *.py[cod]
@@ -28,10 +30,6 @@ uv.lock
 # Environment variables
 .env
 
-# data
-data/
-
 # IDEs
 .vscode/
 .idea/
-

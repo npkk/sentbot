@@ -14,9 +14,14 @@ Discordの文章から感情分析を行い、必要な時に低速モードへ�
 - Docker
 
 ## セットアップ
+
+### local
 1. `.env.example` を `.env` にコピーし、必要事項を記入してください。
 2. `uv sync` で依存関係をインストールします。
-3. `uv run python src/main.py` で起動します。
+3. `uv run sentbot` で起動します。
+
+### docker
+`docker compose up`で起動します。
 
 ## スラッシュコマンド
 - `/toggle <channel_id/all> <enable/disable>`

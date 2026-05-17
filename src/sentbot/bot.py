@@ -10,12 +10,30 @@ logger = logging.getLogger(__name__)
 
 DATA_DIR = "data"
 STATE_FILE = os.path.join(DATA_DIR, "slowmode_state.json")
+CHANNEL_STATE_FILE = os.path.join(DATA_DIR, "channel_state.json")
 
 def get_author_name(author: discord.abc.User) -> str:
     """discord.abc.User から表示名を取得する"""
     if isinstance(author, discord.Member):
         return author.nick or author.name
     return author.name
+
+async def build_conversation_context(channel: discord.TextChannel, limit: int, timeout_min: int, current_id: int, current_time: datetime):
+    """メッセージ履歴から、連続性のある文脈を取得する"""
+    history = []
+    last_time = current_time
+    async for msg in channel.history(limit=limit + 1):
+        if msg.id == current_id:
+            continue
+        if last_time - msg.created_at > timedelta(minutes=timeout_min):
+            break
+        history.append({
+            "author": get_author_name(msg.author),
+            "content": msg.content
+        })
+        last_time = msg.created_at
+    history.reverse()
+    return history
 
 class SentBot(commands.Bot):
     def __init__(
@@ -32,7 +50,6 @@ class SentBot(commands.Bot):
         super().__init__(command_prefix="!", intents=intents)
         
         self.analyzer = analyzer
-        self.is_monitoring = False
         self.slow_mode_delay = slow_mode_delay
         self.slow_mode_duration = slow_mode_duration
         self.slow_mode_tasks = {}
@@ -40,11 +57,40 @@ class SentBot(commands.Bot):
         self.context_timeout = context_timeout
         self.guild_id = guild_id
         
+        # 監視状態の初期化
+        self._load_monitoring_state()
+        
         if not os.path.exists(DATA_DIR):
             os.makedirs(DATA_DIR)
         if not os.path.exists(STATE_FILE):
             with open(STATE_FILE, "w") as f:
                 json.dump({}, f)
+
+    def _load_monitoring_state(self):
+        """起動時に監視状態をロードする"""
+        if not os.path.exists(CHANNEL_STATE_FILE):
+            self.all_enabled = False
+            self.monitoring_channels = {}
+            return
+        try:
+            with open(CHANNEL_STATE_FILE, "r") as f:
+                state = json.load(f)
+                self.all_enabled = state.get("all_enabled", False)
+                self.monitoring_channels = {int(k): v for k, v in state.get("channels", {}).items()}
+        except Exception as e:
+            logger.error(f"監視状態のロードに失敗しました: {e}")
+            self.all_enabled = False
+            self.monitoring_channels = {}
+
+    def save_monitoring_state(self):
+        """監視状態を保存する"""
+        state = {
+            "all_enabled": self.all_enabled,
+            "channels": {str(k): v for k, v in self.monitoring_channels.items()}
+        }
+        os.makedirs(DATA_DIR, exist_ok=True)
+        with open(CHANNEL_STATE_FILE, "w") as f:
+            json.dump(state, f, indent=2)
 
     async def setup_hook(self):
         if self.guild_id:
@@ -104,9 +150,14 @@ class SentBot(commands.Bot):
         if message.author == self.user:
             return
 
-        if not self.is_monitoring:
+        # 監視状態を確認
+        is_monitored = self.all_enabled or self.monitoring_channels.get(message.channel.id, False)
+
+        if not is_monitored:
             await self.process_commands(message)
             return
+
+        logger.info(f"監視中のためメッセージを解析します: {message.channel.name} by {message.author}")
 
         try:
             history_messages = await build_conversation_context(

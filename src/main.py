@@ -2,6 +2,7 @@ import os
 import logging
 import discord
 from discord import app_commands
+from typing import Literal, Union
 from dotenv import load_dotenv
 from sentbot.sentiment_analyzer import SentimentAnalyzer
 from sentbot.bot import SentBot
@@ -41,25 +42,46 @@ def main():
         guild_id=GUILD_ID
     )
 
-    @bot.tree.command(name="status", description="Botの現在の監視ステータスを表示します")
+    @bot.tree.command(name="status", description="Botの監視ステータスを表示します")
     async def status(interaction: discord.Interaction):
-        status_str = "有効" if bot.is_monitoring else "無効"
+        logger.info(f"コマンド実行: status by {interaction.user}")
         embed = discord.Embed(title="SentBot ステータス", color=discord.Color.blue())
-        embed.add_field(name="全体の監視状態", value=status_str, inline=False)
-        embed.add_field(name="低速モード秒数", value=f"{bot.slow_mode_delay}秒", inline=True)
+        embed.add_field(name="全体監視設定", value="有効" if bot.all_enabled else "無効", inline=False)
+        embed.add_field(name="個別チャンネル設定数", value=f"{len(bot.monitoring_channels)}件", inline=False)
         await interaction.response.send_message(embed=embed)
 
-    @bot.tree.command(name="toggle", description="Bot全体の監視の有効/無効を切り替えます")
-    @app_commands.describe(enabled="有効にする場合はTrue、無効にする場合はFalse")
-    async def toggle(interaction: discord.Interaction, enabled: bool):
-        bot.is_monitoring = enabled
-        state = "有効" if enabled else "無効"
-        logger.info(f"Bot全体の監視設定が変更されました: {state}")
-        await interaction.response.send_message(f"Bot全体の監視を{state}にしました。")
+    @bot.tree.command(name="toggle", description="監視の有効/無効を切り替えます")
+    @app_commands.describe(
+        channel="対象チャンネル（'all'でBot全体、またはチャンネルのメンション）",
+        action="有効にするか無効にするか"
+    )
+    async def toggle(
+        interaction: discord.Interaction, 
+        channel: str, 
+        action: Literal["enable", "disable"]
+    ):
+        logger.info(f"コマンド実行: toggle channel={channel} action={action} by {interaction.user}")
+        enable = (action == "enable")
+
+        if channel == "all":
+            bot.all_enabled = enable
+            bot.save_monitoring_state()
+            await interaction.response.send_message(f"Bot全体の監視を{'有効' if enable else '無効'}にしました。")
+        else:
+            try:
+                # チャンネルのメンション形式(<#...>)からIDを抽出
+                channel_id = int(channel.replace("<#", "").replace(">", ""))
+                bot.monitoring_channels[channel_id] = enable
+                bot.save_monitoring_state()
+                await interaction.response.send_message(f"チャンネル <#{channel_id}> の監視を{'有効' if enable else '無効'}にしました。")
+            except (ValueError, Exception):
+                await interaction.response.send_message("チャンネル（#チャンネル名）または 'all' を正しく指定してください。", ephemeral=True)
+
 
     @bot.tree.command(name="set_slowmode", description="低速モードの秒数を設定します")
     @app_commands.describe(seconds="低速モードの秒数（0で解除）")
     async def set_slowmode(interaction: discord.Interaction, seconds: int):
+        logger.info(f"コマンド実行: set_slowmode seconds={seconds} by {interaction.user}")
         if 0 <= seconds <= 21600:
             bot.slow_mode_delay = seconds
             logger.info(f"低速モード秒数が変更されました: {seconds}")

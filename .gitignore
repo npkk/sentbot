@@ -28,9 +28,10 @@ uv.lock
 # Environment variables
 .env
 
-# Docker
-# .dockerignore (removed)
+# data
+data/
 
 # IDEs
 .vscode/
 .idea/
+
